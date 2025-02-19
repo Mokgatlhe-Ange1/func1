@@ -1,0 +1,134 @@
+import pandas as pd
+import logging
+from pathlib import Path
+from datetime import datetime
+
+# Define paths
+inbound_folder = r'C:\esg_rebuild\Inbound\Electricity'
+outbound_folder = r'C:\esg_rebuild\Outbound\Electricity'
+csv_path = r'C:\esg_rebuild\electricity.csv'
+
+# Create output folders if they don't exist
+Path(inbound_folder).mkdir(parents=True, exist_ok=True)
+Path(outbound_folder).mkdir(parents=True, exist_ok=True)
+
+# Define the logging configuration
+logging.basicConfig(
+    filename='electricity_data_processing.log', 
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def load_and_extract_2025_data(csv_path, consumption_column='value', period_column='date'):
+    """
+    Load a CSV file and extract data for the latest 3 months of 2025.
+    
+    Parameters:
+    csv_path (str): Path to the CSV file (e.g., "C:\\esg_rebuild\\electricity.csv")
+    consumption_column (str): Name of the column containing consumption values
+    period_column (str): Name of the column containing date information
+    
+    Returns:
+    tuple: (pandas.DataFrame: data for the latest 3 months of 2025, 
+            float: average consumption for that period)
+    """
+    try:
+        # Load the CSV file
+        data = pd.read_csv(csv_path, parse_dates=[period_column])
+        logging.info(f'Successfully loaded data from {csv_path}')
+        
+        # Ensure that the date column is in datetime format
+        data[period_column] = pd.to_datetime(data[period_column])
+        
+        # Filter for 2025 data only
+        data_2025 = data[data[period_column].dt.year == 2025]
+        
+        if data_2025.empty:
+            logging.warning('No data found for 2025')
+            return None, None
+            
+        # Sort the data by date column
+        data_2025 = data_2025.sort_values(period_column)
+        
+        # Get the latest 3 months of 2025 data
+        unique_months = sorted(data_2025[period_column].dt.to_period('M').unique())
+        if len(unique_months) < 3:
+            logging.warning(f'Only found {len(unique_months)} months of data for 2025, fewer than the required 3 months')
+            return None, None
+            
+        latest_3_months = unique_months[-3:]
+        latest_data = data_2025[data_2025[period_column].dt.to_period('M').isin(latest_3_months)]
+        
+        # Calculate the average consumption for the latest 3 months
+        avg_consumption = latest_data[consumption_column].mean()
+        logging.info(f'Calculated average consumption for latest 3 months of 2025: {avg_consumption}')
+        
+        # Add month and year columns to the dataframe
+        latest_data["Month"] = latest_data[period_column].dt.month
+        latest_data["Year"] = latest_data[period_column].dt.year
+        
+        return latest_data, avg_consumption
+        
+    except FileNotFoundError:
+        logging.error(f'File not found: {csv_path}')
+        return None, None
+    except Exception as e:
+        logging.error(f'Error processing data: {str(e)}')
+        return None, None
+
+def save_data_files(df, inbound_folder, outbound_folder):
+    """
+    Save the data to a parquet file in the inbound directory 
+    and a CSV file in the outbound directory.
+    
+    Parameters:
+    df (pandas.DataFrame): Processed DataFrame to save
+    inbound_folder (str): Folder to save the parquet file
+    outbound_folder (str): Folder to save the CSV file
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    try:
+        # Generate timestamp for filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Save the DataFrame to parquet in the inbound folder
+        parquet_output_path = Path(inbound_folder) / f"electricity_data_2025_latest3months_{timestamp}.parquet"
+        df.to_parquet(parquet_output_path, index=False)
+        logging.info(f'Saved data to parquet file at {parquet_output_path}')
+        
+        # Save the DataFrame to CSV in the outbound folder
+        csv_output_path = Path(outbound_folder) / f"electricity_data_2025_latest3months_{timestamp}.csv"
+        df.to_csv(csv_output_path, index=False)
+        logging.info(f'Saved data to CSV file at {csv_output_path}')
+        
+        return True
+    except Exception as e:
+        logging.error(f'Error saving data files: {str(e)}')
+        return False
+
+# Main execution block
+if __name__ == "__main__":
+    # Extract the latest 3 months of 2025 data
+    latest_data, avg_consumption = load_and_extract_2025_data(
+        csv_path, 
+        consumption_column='consumption',  # Update with your actual column name
+        period_column='period'             # Update with your actual column name
+    )
+    
+    if latest_data is not None:
+        print(f"Average consumption for the latest 3 months of 2025: {avg_consumption}")
+        print("Sample of extracted data:")
+        print(latest_data.head())
+        
+        # Save the data files
+        save_result = save_data_files(latest_data, inbound_folder, outbound_folder)
+        if save_result:
+            print("Successfully saved data files.")
+            print(f"Parquet file saved to: {inbound_folder}")
+            print(f"CSV file saved to: {outbound_folder}")
+        else:
+            print("Failed to save data files.")
+    else:
+        print("Failed to extract the latest 3 months of 2025 data.")
