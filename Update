@@ -1,0 +1,120 @@
+import pandas as pd
+import logging
+from pathlib import Path
+from datetime import datetime
+
+# Define paths
+inbound_folder = r'C:\esg_rebuild\Inbound\Electricity'
+outbound_folder = r'C:\esg_rebuild\Outbound\Electricity'
+csv_path = r'C:\esg_rebuild\electricity.csv'
+
+# Create output folder if it doesn't exist
+Path(outbound_folder).mkdir(parents=True, exist_ok=True)
+
+# Define the logging configuration
+logging.basicConfig(
+    filename='electricity_data_processing.log', 
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def load_and_calculate_average(csv_path, consumption_column='value', period_column='date'):
+    """
+    Load a CSV file, calculate the average of the last 3 months of data, and handle missing values.
+    
+    Parameters:
+    csv_path (str): Path to the CSV file (e.g., "C:\\esg_rebuild\\electricity.csv")
+    consumption_column (str): Name of the column containing consumption values
+    period_column (str): Name of the column containing date information
+    
+    Returns:
+    tuple: (float: average value of the last 3 months, pandas.DataFrame: processed DataFrame)
+    """
+    try:
+        # Load the CSV file
+        data = pd.read_csv(csv_path, parse_dates=[period_column])
+        logging.info(f'Successfully loaded data from {csv_path}')
+        
+        # Ensure that the date column is in datetime format
+        data[period_column] = pd.to_datetime(data[period_column])
+        
+        # Sort the data by date column
+        data = data.sort_values(period_column)
+        
+        # Get the last 3 months of data
+        last_3_months = data.loc[data[period_column] >= data[period_column].max() - pd.DateOffset(months=3)]
+        
+        if last_3_months.empty:
+            logging.warning('No data found for the last 3 months')
+            avg_last_3_months = None
+        else:
+            # Calculate the average of the last 3 months
+            avg_last_3_months = last_3_months[consumption_column].mean()
+            logging.info(f'Calculated average consumption for last 3 months: {avg_last_3_months}')
+        
+        # Add month and year columns to the dataframe
+        processed_df = data.copy()
+        processed_df["Month"] = processed_df[period_column].dt.month
+        processed_df["Year"] = processed_df[period_column].dt.year
+        
+        return avg_last_3_months, processed_df
+        
+    except FileNotFoundError:
+        logging.error(f'File not found: {csv_path}')
+        return None, None
+    except Exception as e:
+        logging.error(f'Error processing data: {str(e)}')
+        return None, None
+
+def save_processed_data(df, avg_consumption, output_folder):
+    """
+    Save the processed data to a CSV file and the average consumption to a JSON file.
+    
+    Parameters:
+    df (pandas.DataFrame): Processed DataFrame to save
+    avg_consumption (float): Average consumption value to save
+    output_folder (str): Folder to save output files
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    try:
+        # Generate timestamp for filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Save the processed DataFrame to CSV
+        csv_output_path = Path(output_folder) / f"processed_electricity_data_{timestamp}.csv"
+        df.to_csv(csv_output_path, index=False)
+        logging.info(f'Saved processed data to {csv_output_path}')
+        
+        # Save the average consumption to JSON
+        json_output_path = Path(output_folder) / f"average_consumption_{timestamp}.json"
+        with open(json_output_path, 'w') as f:
+            json.dump({"average_consumption": avg_consumption}, f)
+        logging.info(f'Saved average consumption to {json_output_path}')
+        
+        return True
+    except Exception as e:
+        logging.error(f'Error saving processed data: {str(e)}')
+        return False
+
+# Main execution block
+if __name__ == "__main__":
+    import json
+    
+    # Test the function
+    avg_consumption, processed_df = load_and_calculate_average(
+        csv_path, 
+        consumption_column='consumption',  # Update with your actual column name
+        period_column='period'             # Update with your actual column name
+    )
+    
+    if avg_consumption is not None and processed_df is not None:
+        print(f"Average consumption for the last 3 months: {avg_consumption}")
+        print("Processed DataFrame:")
+        print(processed_df.head())
+        
+        # Save the results
+        save_processed_data(processed_df, avg_consumption, outbound_folder)
+    else:
+        print("Failed to process electricity data.")
