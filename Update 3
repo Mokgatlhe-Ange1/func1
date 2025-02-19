@@ -1,0 +1,140 @@
+import pandas as pd
+import logging
+from pathlib import Path
+from datetime import datetime
+import re
+
+# Define paths
+inbound_folder = r'C:\esg_rebuild\Inbound\Electricity'
+outbound_folder = r'C:\esg_rebuild\Outbound\Electricity'
+csv_path = r'C:\esg_rebuild\electricity.csv'
+
+# Create output folders if they don't exist
+Path(inbound_folder).mkdir(parents=True, exist_ok=True)
+Path(outbound_folder).mkdir(parents=True, exist_ok=True)
+
+# Define the logging configuration
+logging.basicConfig(
+    filename='electricity_data_processing.log', 
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def load_and_extract_recent_months(csv_path):
+    """
+    Load a CSV file and extract data for Nov 2024, Dec 2024, Jan 2025
+    Adapted to work with the spreadsheet structure shown in the image.
+    
+    Parameters:
+    csv_path (str): Path to the CSV file
+    
+    Returns:
+    tuple: (pandas.DataFrame: data for the specified 3 months, 
+            float: average consumption for that period)
+    """
+    try:
+        # Load the CSV file - assuming no header row based on the image
+        # Column names based on the screenshot
+        column_names = ['row_number', 'id_code', 'consumption', 'category', 'period']
+        data = pd.read_csv(csv_path, names=column_names, header=None)
+        logging.info(f'Successfully loaded data from {csv_path}')
+        
+        # Clean the period column - in case there are any extra spaces
+        data['period'] = data['period'].str.strip()
+        
+        # Define the date periods we're looking for (YYYY-MM format)
+        target_periods = ['2024-11', '2024-12', '2025-01']
+        
+        # Filter data for our target periods
+        # This handles the YYYY-MM format shown in your spreadsheet
+        three_months_data = data[data['period'].str.extract(r'(\d{4}-\d{2})')[0].isin(target_periods)]
+        
+        if three_months_data.empty:
+            logging.warning('No data found for the specified 3 months')
+            return None, None
+            
+        # Convert consumption to numeric, handling any non-numeric values
+        three_months_data['consumption'] = pd.to_numeric(three_months_data['consumption'], errors='coerce')
+        
+        # Calculate the average consumption for the specified 3 months
+        avg_consumption = three_months_data['consumption'].mean()
+        logging.info(f'Calculated average consumption for Nov 2024 - Jan 2025: {avg_consumption}')
+        
+        # Extract year and month from period column
+        three_months_data['period_clean'] = three_months_data['period'].str.extract(r'(\d{4}-\d{2})')[0]
+        three_months_data['Year'] = three_months_data['period_clean'].str[:4].astype(int)
+        three_months_data['Month'] = three_months_data['period_clean'].str[-2:].astype(int)
+        
+        return three_months_data, avg_consumption
+        
+    except FileNotFoundError:
+        logging.error(f'File not found: {csv_path}')
+        return None, None
+    except Exception as e:
+        logging.error(f'Error processing data: {str(e)}')
+        return None, None
+
+def save_data_files(df, inbound_folder, outbound_folder):
+    """
+    Save the data to a parquet file in the inbound directory 
+    and a CSV file in the outbound directory.
+    
+    Parameters:
+    df (pandas.DataFrame): Processed DataFrame to save
+    inbound_folder (str): Folder to save the parquet file
+    outbound_folder (str): Folder to save the CSV file
+    
+    Returns:
+    bool: True if successful, False otherwise
+    """
+    try:
+        # Generate timestamp for filenames
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Save the DataFrame to parquet in the inbound folder
+        parquet_output_path = Path(inbound_folder) / f"electricity_data_Nov2024-Jan2025_{timestamp}.parquet"
+        df.to_parquet(parquet_output_path, index=False)
+        logging.info(f'Saved data to parquet file at {parquet_output_path}')
+        
+        # Save the DataFrame to CSV in the outbound folder
+        csv_output_path = Path(outbound_folder) / f"electricity_data_Nov2024-Jan2025_{timestamp}.csv"
+        df.to_csv(csv_output_path, index=False)
+        logging.info(f'Saved data to CSV file at {csv_output_path}')
+        
+        return True
+    except Exception as e:
+        logging.error(f'Error saving data files: {str(e)}')
+        return False
+
+# Main execution block
+if __name__ == "__main__":
+    # Extract data for Nov 2024, Dec 2024, Jan 2025
+    three_months_data, avg_consumption = load_and_extract_recent_months(csv_path)
+    
+    if three_months_data is not None:
+        print(f"Average consumption for Nov 2024 - Jan 2025: {avg_consumption}")
+        print(f"Number of records found: {len(three_months_data)}")
+        print("\nSample of extracted data:")
+        print(three_months_data[['id_code', 'consumption', 'period']].head())
+        
+        # Count records by month and year
+        monthly_counts = three_months_data.groupby(['Year', 'Month']).size()
+        print("\nRecords by month:")
+        print(monthly_counts)
+        
+        # Report total consumption by month
+        monthly_totals = three_months_data.groupby(['Year', 'Month'])['consumption'].sum()
+        print("\nTotal consumption by month:")
+        print(monthly_totals)
+        
+        # Save the data files
+        save_result = save_data_files(three_months_data, inbound_folder, outbound_folder)
+        if save_result:
+            print("\nSuccessfully saved data files:")
+            print(f"Parquet file saved to: {inbound_folder}")
+            print(f"CSV file saved to: {outbound_folder}")
+        else:
+            print("Failed to save data files.")
+    else:
+        print("Failed to extract data for Nov 2024 - Jan 2025.")
+        print("Please check if your CSV file contains data for these months.")
