@@ -1,0 +1,74 @@
+import pandas as pd
+import logging
+from pathlib import Path
+import json
+from datetime import datetime
+
+folder = f'C:\esg_rebuild\Inbound\Electricity'
+output_folder = f'C:\esg_rebuild\Outbound\Electricity'
+
+# Load the CSV file
+
+try:
+    data = pd.read_csv(csv_path, parse_dates=[date_column])
+except FileNotFoundError:
+    logging.error(f'File not found: {csv_path}')
+    return False 
+
+# Create output folder if it doesn't exist
+Path(output_folder).mkdir(parents=True, exist_ok=True)
+
+# Define the logging configuration
+
+logging.basicConfig(filename='electricity_data_processing.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+
+def load_and_process_data(csv_path, value_column='value', date_column='date'):
+    """
+    Load a CSV file, handle missing values, and calculate the average consumption per month.
+csv_path (str): "C:\esg_rebuild\electricity.csv"
+value_column (str): 'consumption'
+date_column (str): 'period'
+
+Returns:
+float: average consumption per month
+pandas.DataFrame: processed DataFrame with added 'Month' and 'Year' columns
+"""
+
+def load_and_calculate_average(csv_path, value_column='value', date_column='date'):
+    """
+    data (pandas.DataFrame): DataFrame containing the data
+    Load a CSV file, calculate the average of the last 3 months of data, and handle missing values.
+csv_path (str): "C:\esg_rebuild\electricity.csv"
+value_column (str): 'consumption'
+date_column (str): 'period'
+
+Returns:
+float: average value of the last 3 months
+""" 
+#Ensure that the date column is in datetime format
+date[period_column] = pd.to_datetime(data[period_column])
+
+#sort the data by date column
+data = data.sort_values(period_column)
+
+#get the las 3 months of data
+last_3_months = data.loc[data[period_column] >= data[period_column].max() - pd.DateOffset(months=3)]
+    
+    # calculate the average of the last 3 months
+avg_last_3_months = last_3_months[consumption_column].mean()
+
+# add month and year columns to the dataframe
+
+processed_df = data.copy()
+processed_df["Month"] = processed_df[period_column].dt.month
+processed_df["Year"] = processed_df[period_column].dt.year 
+return avg_last_3_months, processed_df 
+
+#test the function
+
+avg_consumption, processed_df = load_and_calculate_average("C:\esg_rebuild\electricity.csv")
+print(f"Average consumption for the last 3 months: {avg_consumption}")
+print("Processed DataFrame:")
+print(processed_df.head())
+    
