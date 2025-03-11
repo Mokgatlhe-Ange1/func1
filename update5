@@ -1,0 +1,41 @@
+import pandas as pd
+from datetime import datetime, timedelta
+
+def calculate_last_three_months_average(csv_file_path, date_column, value_column, oneview_filter=None):
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+    
+    # Get the current date
+    current_date = datetime.now()
+    
+    # Calculate the date three months ago
+    three_months_ago = current_date - timedelta(days=90)
+    
+    # Filter the DataFrame to include only the last three months
+    last_three_months_df = df[df[date_column] >= three_months_ago]
+    
+    # Apply oneview filter if provided
+    if oneview_filter is not None and 'oneview' in df.columns:
+        last_three_months_df = last_three_months_df[last_three_months_df['oneview'] == oneview_filter]
+    
+    # Calculate the average of the value column for the last three months
+    average_value = last_three_months_df[value_column].mean()
+    
+    return average_value
+
+# Example usage
+csv_file_path = 'C:\\esg\\esgRebuild.csv'  # Corrected with .csv extension
+date_column = 'period'
+value_column = 'consumption'
+oneview_value = 'your_oneview_value'  # Replace with your actual oneview value
+
+average = calculate_last_three_months_average(
+    csv_file_path, 
+    date_column, 
+    value_column,
+    oneview_filter=oneview_value
+)
+print(f'Average value for the last three months: {average}')
