@@ -1,0 +1,205 @@
+import pandas as pd
+from datetime import datetime, timedelta
+
+def fill_data_gap(csv_file_path, date_column, value_column, oneview, gap_month):
+    """
+    Fill data gaps using business rules:
+    1. Type 1: Average of three months before the gap
+    2. Type 2: Same month in previous year
+    
+    Parameters:
+    - csv_file_path: Path to the CSV file
+    - date_column: Name of the date column
+    - value_column: Name of the value column to be averaged
+    - oneview: Filter value for oneview column
+    - gap_month: The month with the data gap (string or datetime)
+    
+    Returns:
+    - value: The calculated value to fill the gap
+    - rule_type: Which business rule was applied ("Type 1", "Type 2", or "No suitable data")
+    - details: Description of the data used for calculation
+    """
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+    
+    # Filter by oneview
+    df_filtered = df[df['oneview'] == oneview]
+    
+    # Check if any data exists for this oneview
+    if df_filtered.empty:
+        return None, "No data", f"No data found for oneview {oneview}"
+    
+    # Convert gap_month to datetime if it's a string
+    if isinstance(gap_month, str):
+        gap_month = pd.to_datetime(gap_month)
+    
+    # BUSINESS RULE - STEP 1 (TYPE 1)
+    # Calculate the date three months before the gap
+    three_months_before_gap = gap_month - timedelta(days=90)
+    
+    # Get data for the 3 months before the gap
+    previous_three_months = df_filtered[
+        (df_filtered[date_column] >= three_months_before_gap) & 
+        (df_filtered[date_column] < gap_month)
+    ]
+    
+    # Group by month to check for consecutive months
+    monthly_data = previous_three_months.groupby(
+        previous_three_months[date_column].dt.to_period('M')
+    ).agg({
+        value_column: 'sum',
+        date_column: 'count'
+    })
+    
+    # Check if we have data for each of the three preceding months
+    if len(monthly_data) == 3:
+        # Calculate the average of the three months
+        average_value = monthly_data[value_column].mean()
+        months_covered = [period.strftime('%Y-%m') for period in monthly_data.index.to_timestamp()]
+        return average_value, "Type 1", f"Three-month average ({', '.join(months_covered)})"
+    
+    # BUSINESS RULE - STEP 2 (TYPE 2)
+    # If three consecutive months data not available, check previous year's same month
+    previous_year = gap_month.year - 1
+    same_month_previous_year = df_filtered[
+        (df_filtered[date_column].dt.year == previous_year) & 
+        (df_filtered[date_column].dt.month == gap_month.month)
+    ]
+    
+    if not same_month_previous_year.empty:
+        previous_year_value = same_month_previous_year[value_column].sum()
+        previous_period = f"{previous_year}-{gap_month.month:02d}"
+        return previous_year_value, "Type 2", f"Previous year's value ({previous_period})"
+    
+    # If neither rule can be applied
+    return None, "No suitable data", "Could not apply either business rule to fill the gap"
+
+
+def calculate_last_three_months_average(csv_file_path, date_column, value_column, oneview_filter=None):
+    """
+    Calculate the average value for the last three months of available data.
+    
+    Parameters:
+    - csv_file_path: Path to the CSV file
+    - date_column: Name of the date column
+    - value_column: Name of the value column to be averaged
+    - oneview_filter: Optional filter value for oneview column
+    
+    Returns:
+    - average_value: The calculated average value
+    - three_months_ago: Start date of the calculation period
+    - upload_date: End date of the calculation period (most recent date in data)
+    """
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+    
+    # Get the most recent date in the dataset (when the data is uploaded)
+    upload_date = df[date_column].max()
+    
+    # Calculate the date three months before the date it was uploaded
+    three_months_ago = upload_date - timedelta(days=90)
+    
+    # Filter the DataFrame to include only the last three months
+    last_three_months_df = df[(df[date_column] >= three_months_ago) & (df[date_column] <= upload_date)]
+    
+    # Apply oneview filter if given
+    if oneview_filter is not None and 'oneview' in df.columns:
+        last_three_months_df = last_three_months_df[last_three_months_df['oneview'] == oneview_filter]
+    
+    # Calculate the average of the value column for the last three months
+    average_value = last_three_months_df[value_column].mean()
+    
+    return average_value, three_months_ago, upload_date
+
+
+def get_last_year_value(csv_file_path, date_column, value_column, oneview=None):
+    """
+    Get the value from the same month in the previous year.
+    
+    Parameters:
+    - csv_file_path: Path to the CSV file
+    - date_column: Name of the date column
+    - value_column: Name of the value column
+    - oneview: Optional filter value for oneview column
+    
+    Returns:
+    - The value from the same month in the previous year, or an error message
+    """
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+ 
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+ 
+    # Get the most recent date in the dataset (when the data is uploaded)
+    upload_date = df[date_column].max()
+ 
+    # Filter by building number if provided
+    if oneview is not None:
+        df = df[df['oneview'] == oneview]
+        
+        # Check if any data exists for this building
+        if df.empty:
+            return "No data found for building number " + str(oneview)
+
+    # Find the latest month and year
+    latest_month = upload_date.month
+    latest_year = upload_date.year
+    
+    # Calculate the same month in the previous year
+    previous_year = latest_year - 1
+    
+    # Filter to get the data for the same month in the previous year
+    last_year_data = df[(df[date_column].dt.year == previous_year) & 
+                        (df[date_column].dt.month == latest_month)]
+    
+    # Get the value for this month in the previous year
+    if last_year_data.empty:
+        return "No data found for " + str(latest_month) + "/" + str(previous_year)
+    else:
+        last_year_value = last_year_data[value_column].sum()
+        return last_year_value
+
+
+def main():
+    csv_file_path = 'C:\\ESG\\esgRebuild\\electricity.csv'
+    date_column = 'period'
+    value_column = 'consumption'
+    oneview_number = '77399X'
+    gap_month = '2025-02-01'  # Month with missing data
+    
+    # Example 1: Fill a data gap
+    value, rule_type, details = fill_data_gap(
+        csv_file_path, date_column, value_column, oneview_number, gap_month
+    )
+    
+    if value is not None:
+        print(f"Gap filled successfully using {rule_type}")
+        print(f"Value: {value}")
+        print(f"Details: {details}")
+    else:
+        print(f"Failed to fill gap: {details}")
+    
+    # Example 2: Calculate last three months average
+    average, start_date, end_date = calculate_last_three_months_average(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        oneview_filter=oneview_number
+    )
+    
+    print(f'Average value from {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")}: {average}')
+    
+    # Example 3: Get last year's value
+    last_year_value = get_last_year_value(csv_file_path, date_column, value_column, oneview_number)
+    print(f'Value for the last year: {last_year_value}')
+
+
+if __name__ == "__main__":
+    main()
