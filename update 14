@@ -1,0 +1,183 @@
+import pandas as pd
+from datetime import datetime, timedelta
+
+def calculate_last_three_months_average(csv_file_path, date_column, value_column, oneview):
+    """
+    Calculate the average consumption for the last three months of data
+    for a specific oneview building site.
+    
+    Returns:
+        tuple: (average_value, start_date, end_date) if successful
+               (None, "Gap", error_message) if unsuccessful
+    """
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+    
+    # Filter by oneview
+    df = df[df['oneview'] == oneview]
+    
+    # Check if any data exists for this oneview
+    if df.empty:
+        return None, "Gap", f"No data found for oneview {oneview}"
+    
+    # Get the most recent date in the dataset
+    upload_date = df[date_column].max()
+    
+    # Calculate the date three months before the latest date
+    three_months_ago = upload_date - timedelta(days=90)
+    
+    # Filter for the last three months
+    last_three_months_df = df[(df[date_column] >= three_months_ago) & (df[date_column] <= upload_date)]
+    
+    # Group by month to check if we have data for each of the last three months
+    monthly_data = last_three_months_df.groupby(
+        last_three_months_df[date_column].dt.to_period('M')
+    ).agg({
+        value_column: 'sum',
+        date_column: 'count'
+    })
+    
+    # Check if we have data for all three months
+    if len(monthly_data) == 3:
+        # Calculate the average of the three months
+        average_value = monthly_data[value_column].mean()
+        return average_value, three_months_ago, upload_date
+    else:
+        return None, "Gap", f"Insufficient data: Only found {len(monthly_data)} months of data instead of 3"
+
+def get_last_year_value_for_month(csv_file_path, date_column, value_column, oneview, gap_month):
+    """
+    Get the consumption value for the same month in the previous year
+    for a specific oneview building site.
+    
+    Args:
+        gap_month: The month we need data for (datetime or string)
+        
+    Returns:
+        tuple: (value, "Last Year", details) if successful
+               (None, "Gap", error_message) if unsuccessful
+    """
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime
+    df[date_column] = pd.to_datetime(df[date_column])
+    
+    # Filter by oneview
+    df = df[df['oneview'] == oneview]
+    
+    # Check if any data exists for this oneview
+    if df.empty:
+        return None, "Gap", f"No data found for oneview {oneview}"
+    
+    # Convert gap_month to datetime if it's a string
+    if isinstance(gap_month, str):
+        gap_month = pd.to_datetime(gap_month)
+    
+    # Calculate the same month in the previous year
+    previous_year = gap_month.year - 1
+    previous_year_month = datetime(previous_year, gap_month.month, 1)
+    
+    # Filter to get data for the same month in the previous year
+    last_year_data = df[
+        (df[date_column].dt.year == previous_year) & 
+        (df[date_column].dt.month == gap_month.month)
+    ]
+    
+    # Check if we have data for this month in the previous year
+    if not last_year_data.empty:
+        previous_year_value = last_year_data[value_column].sum()
+        previous_period = f"{previous_year}-{gap_month.month:02d}"
+        return previous_year_value, "Last Year", f"Same month in previous year ({previous_period})"
+    else:
+        gap_str = gap_month.strftime('%Y-%m')
+        return None, "Gap", f"No data found for {gap_str} in previous year"
+
+def apply_intensity_factors(oneview, gap_month):
+    """
+    Placeholder function for applying intensity factors when both
+    3-month average and last year's values are unavailable.
+    
+    This function will be implemented by another person.
+    
+    Returns:
+        tuple: (value, "Intensity Factor", details) if successful
+               (None, "Gap", error_message) if unsuccessful
+    """
+    # Placeholder for the intensity factors implementation
+    # This will be implemented by someone else
+    
+    # Return a placeholder result for now
+    return None, "Gap", "Intensity factors not yet implemented"
+
+def get_building_consumption(csv_file_path, date_column, value_column, oneview, target_month=None):
+    """
+    Main function to get the consumption value for a building site (oneview)
+    using the fallback hierarchy:
+    1. Last 3 months average
+    2. Last year's value for the same month
+    3. Intensity factors
+    
+    Args:
+        target_month: Optional specific month to calculate for (defaults to current month)
+    
+    Returns:
+        tuple: (value, method, details)
+    """
+    # If target_month is not provided, use the current month
+    if target_month is None:
+        target_month = datetime.now().replace(day=1)
+    elif isinstance(target_month, str):
+        target_month = pd.to_datetime(target_month)
+    
+    # Step 1: Try to get the last 3 months average
+    result = calculate_last_three_months_average(csv_file_path, date_column, value_column, oneview)
+    value, status, details = result
+    
+    if status != "Gap":
+        return value, "Three-Month Average", details
+    
+    # Step 2: If step 1 fails, try to get last year's value for the same month
+    result = get_last_year_value_for_month(csv_file_path, date_column, value_column, oneview, target_month)
+    value, status, details = result
+    
+    if status != "Gap":
+        return value, "Last Year Value", details
+    
+    # Step 3: If step 2 fails, use intensity factors
+    result = apply_intensity_factors(oneview, target_month)
+    value, status, details = result
+    
+    # Return the final result
+    return value, status, details
+
+def main():
+    # Configuration
+    csv_file_path = 'C:\\ESG\\esgRebuild\\electricity.csv'
+    date_column = 'period'
+    value_column = 'consumption'
+    oneview_number = '77399X'
+    target_month = '2025-01-01'
+    
+    # Get consumption value using the fallback hierarchy
+    value, method, details = get_building_consumption(
+        csv_file_path, 
+        date_column, 
+        value_column, 
+        oneview_number,
+        target_month
+    )
+    
+    # Display the result
+    if method == "Gap":
+        print(f"Could not determine consumption value: {details}")
+    else:
+        print(f"Consumption value: {value}")
+        print(f"Method used: {method}")
+        print(f"Details: {details}")
+
+if __name__ == "__main__":
+    main()
