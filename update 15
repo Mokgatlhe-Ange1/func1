@@ -1,0 +1,42 @@
+def main():
+    csv_file_path = 'C:\\ESG\\esgRebuild\\electricity.csv'
+    date_column = 'period'
+    value_column = 'consumption'
+    oneview_number = '77399X'
+    gap_month = '2025-01-01'  
+    
+    # Example 1: Calculate last three months average
+    result = calculate_last_three_months_average(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        oneview_filter=oneview_number
+    )
+    
+    # Check if we got a valid average or a gap
+    if isinstance(result[1], str) and result[1] == "Gap":
+        # No 3-month average available, try to get last year's value
+        last_year_result = get_last_year_value(csv_file_path, date_column, value_column, oneview_number)
+        if isinstance(last_year_result, str) and last_year_result.startswith("No"):
+            print(last_year_result)  # Print error message if no last year value
+        else:
+            print(f'Value for the last year: {last_year_result}')
+    else:
+        average, start_date, end_date = result
+        print(f'Average value from {start_date.strftime("%Y-%m-%d")} to {end_date.strftime("%Y-%m-%d")}: {average}')
+    
+    # Example 2: Fill a data gap using the business rules
+    value, rule_type, details = fill_data_gap(
+       csv_file_path, date_column, value_column, oneview_number, gap_month
+    )
+    
+    # Only display the gap-filling value if the 3-month average wasn't available
+    if value is None:
+        print(f"Gap identified: {details}")
+    elif rule_type == "Step 2: Previous year's value":
+        # Only show this if we couldn't use the 3-month average
+        print(f"Gap filled with {rule_type}: {value} ({details})")
+    # If we have a Step 1 value (3-month average), we don't display it as per requirement
+
+if __name__ == "__main__":
+    main()
