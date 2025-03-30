@@ -1,0 +1,266 @@
+import pandas as pd
+from datetime import datetime, timedelta
+
+def fill_data_gap(csv_file_path, date_column, value_column, oneview, gap_month):
+    # Read the CSV file into a DataFrame
+    df = pd.read_csv(csv_file_path)
+    
+    # Convert the date column to datetime - using Year-Month format
+    df[date_column] = pd.to_datetime(df[date_column], format='%Y-%m')
+    
+    # Filter by oneview
+    df_filtered = df[df['oneview'] == oneview]
+    
+    # Check if any data exists for this oneview
+    if df_filtered.empty:
+        return None, "Gap", f"No data found for oneview {oneview}"
+    
+    # Convert gap_month to datetime if it's a string
+    if isinstance(gap_month, str):
+        gap_month = pd.to_datetime(gap_month, format='%Y-%m')
+    
+    # BUSINESS RULE - STEP 1: Check for three preceding consecutive months
+    # Calculate the date three months before the gap
+    three_months_before_gap = gap_month - pd.DateOffset(months=3)
+    
+    # Get data for the 3 months before the gap
+    previous_three_months = df_filtered[
+        (df_filtered[date_column] >= three_months_before_gap) & 
+        (df_filtered[date_column] < gap_month)
+    ]
+    
+    # Group by month to check for consecutive months
+    monthly_data = previous_three_months.groupby(
+        previous_three_months[date_column].dt.to_period('M')
+    ).agg({
+        value_column: 'sum',
+        date_column: 'count'
+    })
+    
+    # Check if we have actual data for each of the three preceding consecutive months
+    if len(monthly_data) == 3:
+        # Calculate the average of the three months
+        average_value = monthly_data[value_column].mean()
+        months_covered = [period.strftime('%Y-%m') for period in monthly_data.index.to_timestamp()]
+        return average_value, "Step 1: Three-month average", f"Average of preceding three consecutive months ({', '.join(months_covered)})"
+    
+    # BUSINESS RULE - STEP 2: If three consecutive months data not available,
+    # check previous year's same month
+    previous_year = gap_month.year - 1
+    same_month_previous_year = df_filtered[
+        (df_filtered[date_column].dt.year == previous_year) & 
+        (df_filtered[date_column].dt.month == gap_month.month)
+    ]
+    
+    if not same_month_previous_year.empty:
+        previous_year_value = same_month_previous_year[value_column].sum()
+        previous_period = f"{previous_year}-{gap_month.month:02d}"
+        return previous_year_value, "Step 2: Previous year's value", f"Same month in previous year ({previous_period})"
+    
+    # If neither rule can be applied, show the gap
+    gap_str = gap_month.strftime('%Y-%m')
+    return None, "Gap", f"Step 1 failed: Missing three consecutive months. Step 2 failed: No data for {gap_str} in previous year."
+
+
+def calculate_three_months_average(csv_file_path, date_column, value_column, reference_month, oneview_filter=None):
+    """
+    Calculate the average for the 3 months ending with the reference month
+    """
+    try:
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(csv_file_path)
+        
+        # Convert the date column to datetime - using Year-Month format
+        df[date_column] = pd.to_datetime(df[date_column], format='%Y-%m')
+        
+        # Filter by oneview if provided
+        if oneview_filter is not None and 'oneview' in df.columns:
+            df = df[df['oneview'] == oneview_filter]
+            
+            # Check if any data exists for this oneview
+            if df.empty:
+                print(f"No data found for oneview {oneview_filter}")
+                return None
+        
+        # Convert reference_month to datetime if it's a string
+        if isinstance(reference_month, str):
+            reference_month = pd.to_datetime(reference_month, format='%Y-%m')
+        
+        print(f"Reference month for calculation: {reference_month.strftime('%Y-%m')}")
+        
+        # Calculate the date 3 months before the reference month (inclusive)
+        start_date = reference_month - pd.DateOffset(months=2)
+        end_date = reference_month
+        
+        print(f"Calculating average for period: {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+        
+        # Create a list of the three months we need
+        required_months = []
+        for i in range(3):
+            month_date = start_date + pd.DateOffset(months=i)
+            required_months.append(pd.Period(month_date, freq='M'))
+        
+        # Filter the DataFrame to include only the 3 months including and before reference_month
+        three_month_period_df = df[
+            (df[date_column] >= start_date) & 
+            (df[date_column] <= end_date)
+        ]
+        
+        if three_month_period_df.empty:
+            print(f"No data found for the period {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}")
+            return None
+        
+        # Convert to periods for grouping
+        three_month_period_df['period_month'] = three_month_period_df[date_column].dt.to_period('M')
+        
+        # Group by month
+        monthly_data = three_month_period_df.groupby('period_month').agg({
+            value_column: 'sum'
+        })
+        
+        # Print what we found
+        months_found = [period.strftime('%Y-%m') for period in monthly_data.index.to_timestamp()]
+        print(f"Found data for these months: {', '.join(months_found)}")
+        
+        # Check if we have all required months
+        found_periods = set(monthly_data.index)
+        required_periods = set(required_months)
+        missing_periods = required_periods - found_periods
+        
+        if missing_periods:
+            missing_months = [period.strftime('%Y-%m') for period in missing_periods]
+            print(f"Missing data for months: {', '.join(missing_months)}")
+            return None
+        
+        # Make sure the monthly data is properly sorted
+        monthly_data = monthly_data.reindex(required_months)
+        
+        # Calculate the average of the value column for these three months
+        average_value = monthly_data[value_column].mean()
+        
+        # Print monthly values
+        for period, value in zip(monthly_data.index, monthly_data[value_column]):
+            print(f"  {period.strftime('%Y-%m')}: {value:.2f}")
+        print(f"Calculated average: {average_value:.2f}")
+        
+        return average_value, start_date, end_date
+        
+    except Exception as e:
+        print(f"Error in calculate_three_months_average: {str(e)}")
+        return None
+
+
+def get_previous_year_same_month_value(csv_file_path, date_column, value_column, reference_month, oneview=None):
+    """
+    Get the value from the same month in the previous year
+    """
+    try:
+        # Read the CSV file into a DataFrame
+        df = pd.read_csv(csv_file_path)
+     
+        # Convert the date column to datetime - using Year-Month format
+        df[date_column] = pd.to_datetime(df[date_column], format='%Y-%m')
+        
+        # Check if the DataFrame is empty
+        if df.empty:
+            return "No data available in the dataset"
+     
+        # Filter by oneview if provided
+        if oneview is not None:
+            df = df[df['oneview'] == oneview]
+            
+            # Check if any data exists for this oneview
+            if df.empty:
+                return f"No data found for oneview {oneview}"
+        
+        # Convert reference_month to datetime if it's a string
+        if isinstance(reference_month, str):
+            reference_month = pd.to_datetime(reference_month, format='%Y-%m')
+        
+        # Calculate the same month in the previous year
+        previous_year = reference_month.year - 1
+        
+        print(f"Looking for data from {previous_year}-{reference_month.month:02d}")
+        
+        # Filter to get the data for the same month in the previous year
+        last_year_data = df[
+            (df[date_column].dt.year == previous_year) & 
+            (df[date_column].dt.month == reference_month.month)
+        ]
+        
+        # Get the value for this month in the previous year
+        if last_year_data.empty:
+            return f"No data found for {reference_month.month:02d}/{previous_year}"
+        
+        last_year_value = last_year_data[value_column].sum()
+        
+        # Check if the value exists (not NaN)
+        if pd.isna(last_year_value):
+            return f"Unable to calculate value for {reference_month.month:02d}/{previous_year}"
+            
+        return last_year_value, f"{previous_year}-{reference_month.month:02d}"
+        
+    except Exception as e:
+        print(f"Error in get_previous_year_same_month_value: {str(e)}")
+        return f"Error getting previous year data: {str(e)}"
+
+
+def main():
+    csv_file_path = 'C:\\ESG\\esgRebuild\\electricity.csv'
+    date_column = 'period'
+    value_column = 'consumption'
+    oneview_number = '77399X'
+    
+    print("\n===== Starting ESG Consumption Analysis =====")
+    
+    # Get the current date and use the previous month as reference
+    current_date = datetime.now()
+    reference_month = current_date.replace(day=1) - timedelta(days=1)
+    reference_month_str = reference_month.strftime('%Y-%m')
+    
+    print(f"Current date: {current_date.strftime('%Y-%m-%d')}")
+    print(f"Reference month: {reference_month_str}")
+    print(f"OneView ID: {oneview_number}")
+    print("--------------------------------------------")
+    
+    # First try to calculate 3-month average
+    print("\nAttempting to calculate 3-month average...")
+    three_month_avg_result = calculate_three_months_average(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        reference_month,
+        oneview_filter=oneview_number
+    )
+    
+    # Check if we have a valid 3-month average
+    if three_month_avg_result is not None and isinstance(three_month_avg_result, tuple) and len(three_month_avg_result) == 3:
+        # We have a valid 3-month average
+        average, start_date, end_date = three_month_avg_result
+        print("\nRESULT: Using 3-month average")
+        print(f"Average consumption from {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}: {average:.2f}")
+        return
+    
+    # If we get here, we couldn't calculate a 3-month average
+    print("\nCould not calculate 3-month average. Attempting to get previous year's value...")
+    
+    # Try to get last year's value for the reference month
+    last_year_result = get_previous_year_same_month_value(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        reference_month,
+        oneview_number
+    )
+    
+    if isinstance(last_year_result, str):
+        print(f"\nRESULT: {last_year_result}")
+        print("No data available for either 3-month average or previous year. Gap identified.")
+    else:
+        value, period = last_year_result
+        print("\nRESULT: Using previous year's value")
+        print(f"Consumption for same month in previous year ({period}): {value:.2f}")
+
+
+if __name__ == "__main__":
+    main()
