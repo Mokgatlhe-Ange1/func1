@@ -1,0 +1,65 @@
+def main():
+    csv_file_path = 'C:\\ESG\\esgRebuild\\electricity.csv'
+    date_column = 'period'
+    value_column = 'consumption'
+    oneview_number = '77399X'
+    
+    print("\n===== Starting ESG Consumption Analysis =====")
+    
+    # Get the current date and use the previous month as reference
+    current_date = datetime.now()
+    reference_month = current_date.replace(day=1) - timedelta(days=1)
+    reference_month_str = reference_month.strftime('%Y-%m')
+    
+    print(f"Current date: {current_date.strftime('%Y-%m-%d')}")
+    print(f"Reference month: {reference_month_str}")
+    print(f"OneView ID: {oneview_number}")
+    print("--------------------------------------------")
+    
+    # First try to calculate 3-month average
+    print("\nAttempting to calculate 3-month average...")
+    three_month_avg_result = calculate_three_months_average(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        reference_month,
+        oneview_filter=oneview_number
+    )
+    
+    # Debug print the result type
+    print(f"Result type: {type(three_month_avg_result)}")
+    if three_month_avg_result is not None:
+        print(f"Result contents: {three_month_avg_result}")
+    
+    # Check if we have a valid 3-month average
+    if three_month_avg_result is not None and isinstance(three_month_avg_result, tuple) and len(three_month_avg_result) == 3:
+        # We have a valid 3-month average
+        average, start_date, end_date = three_month_avg_result
+        print("\nRESULT: Using 3-month average")
+        print(f"Average consumption from {start_date.strftime('%Y-%m')} to {end_date.strftime('%Y-%m')}: {average:.2f}")
+        return
+    
+    # If we get here, we couldn't calculate a 3-month average
+    print("\nCould not calculate 3-month average. Attempting to get previous year's value...")
+    
+    # Try to get last year's value for the reference month
+    last_year_result = get_previous_year_same_month_value(
+        csv_file_path, 
+        date_column, 
+        value_column,
+        reference_month,
+        oneview_number
+    )
+    
+    print(f"Previous year result type: {type(last_year_result)}")
+    print(f"Previous year result: {last_year_result}")
+    
+    if isinstance(last_year_result, str):
+        print(f"\nRESULT: {last_year_result}")
+        print("No data available for either 3-month average or previous year. Gap identified.")
+    elif isinstance(last_year_result, tuple) and len(last_year_result) == 2:
+        value, period = last_year_result
+        print("\nRESULT: Using previous year's value")
+        print(f"Consumption for same month in previous year ({period}): {value:.2f}")
+    else:
+        print("\nRESULT: Unexpected result format. Please check the data and functions.")
